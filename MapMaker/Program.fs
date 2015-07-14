@@ -12,6 +12,9 @@ open MathNet.Numerics.Distributions
 do
     let saveDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                                      "map_images")
+
+    if not (Directory.Exists(saveDirectory)) then raise (new Exception("Save folder must exist"))
+
     let longitudeStart  = 42.779399
     let latitudeStart = 76.097755
 
@@ -38,22 +41,20 @@ do
             let mapRequest = HttpWebRequest.CreateHttp(url)
             let response = mapRequest.GetResponse()
             let dataStream = match response.ContentType with
-                                | "image/png" -> response.GetResponseStream()
-                                | _ -> raise (new Exception())
+                             | "image/png" -> response.GetResponseStream()
+                             | _ -> raise (new Exception())
 
             let wholeBitmap = Bitmap.FromStream(dataStream) :?> Bitmap
 
             // crop out Google logo
             let croppedImg = wholeBitmap.Clone(new Rectangle(0, 0, wholeBitmap.Width,
-                                                                int(float(wholeBitmap.Height) * 0.957)),
-                                                Imaging.PixelFormat.DontCare)
+                                                             int(float(wholeBitmap.Height) * 0.957)),
+                                               Imaging.PixelFormat.DontCare)
 
-            if Directory.Exists(saveDirectory) then
-                croppedImg.Save(Path.Combine(saveDirectory, (sprintf "iimg_y%i_x%i.png" yy xx)),
-                                ImageFormat.Png) |> ignore
-            else
-                raise (new Exception())
+            let filename = sprintf "iimg_y%03i_x%03i.png" yy xx
+            croppedImg.Save(Path.Combine(saveDirectory, filename), ImageFormat.Png) |> ignore
 
             // rate limit or Google will blacklist you
             let secondsWait = normalDist.Sample()
+            printfn "Sleeping %f seconds..." secondsWait
             Thread.Sleep((int)(1000.0 * secondsWait))
