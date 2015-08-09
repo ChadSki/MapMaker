@@ -15,46 +15,59 @@ do
 
     if not (Directory.Exists(saveDirectory)) then raise (new Exception("Save folder must exist"))
 
-    let longitudeStart  = 42.779399
-    let latitudeStart = 76.097755
+    let longitudeStart  = 45.712660
+    let latitudeStart = 58.397553
 
-    // For random wait times between requests
-    let normalDist = new Normal(600.0, 100.0) // appx 300-900 seconds (5-15 minutes)
+    // these step values are perfectly spaced for this zoom level *at tile 0,0* but are too spaced at other
+    // latitudes. let's use 90% so there is overlap, then we can fix the overlap later.
+    let longitudeStep = -2.517 * 0.9
+    let latitudeStep = 3.517 * 0.9
 
-    for yy in 0 .. 9 do
-        let longitude = longitudeStart - (2.60 * (float)yy)
+    let edgePixels = 640  // maximum value without a business license
+    let scale = 2  // but render the vector at twice the pixel density
+    let zoom = 8
 
-        printfn "Row %i -----------------------------------------------------" yy
+    // for random wait times between requests
+    let normalDistWait = new Normal(75.0, 15.0)
 
-        for xx in 0 .. 17 do
-            let latitude = latitudeStart + (3.30 * (float)xx)
+    // sequence of all URLs we will request
+    let urls = seq {
+        for yy in 0 .. 12 do
+            let longitude = longitudeStart + (longitudeStep * (float)yy)
 
-            let url = "https://maps.googleapis.com/maps/api/staticmap?"
-                      + (sprintf "&center=%f, %f" longitude latitude)
-                      + "&size=640x640"
-                      + "&scale=2"
-                      + "&maptype=terrain"
-                      + "&zoom=8"
+            for xx in 0 .. 20 do
+                let latitude = latitudeStart + (latitudeStep * (float)xx)
 
-            printfn "%s" url
+                let url = "https://maps.googleapis.com/maps/api/staticmap?"
+                          + (sprintf "&center=%f, %f" longitude latitude)
+                          + (sprintf "&size=%dx%d" edgePixels edgePixels)
+                          + (sprintf "&scale=%d" scale)
+                          + (sprintf "&zoom=%d" zoom)
+                          + "&maptype=terrain"
+                yield (url, xx, yy)
+    }
 
-            let mapRequest = HttpWebRequest.CreateHttp(url)
-            let response = mapRequest.GetResponse()
-            let dataStream = match response.ContentType with
-                             | "image/png" -> response.GetResponseStream()
-                             | _ -> raise (new Exception())
+    for (url, xx, yy) in urls do
+        printf "%d,%d | %s" xx yy url
 
-            let wholeBitmap = Bitmap.FromStream(dataStream) :?> Bitmap
+        let mapRequest = HttpWebRequest.CreateHttp(url)
+        let response = mapRequest.GetResponse()
+        let dataStream = match response.ContentType with
+                            | "image/png" -> response.GetResponseStream()
+                            | _ -> raise (new Exception())
 
-            // crop out Google logo
-            let croppedImg = wholeBitmap.Clone(new Rectangle(0, 0, wholeBitmap.Width,
-                                                             int(float(wholeBitmap.Height) * 0.957)),
-                                               Imaging.PixelFormat.DontCare)
+        let wholeBitmap = Bitmap.FromStream(dataStream) :?> Bitmap
 
-            let filename = sprintf "iimg_y%03i_x%03i.png" yy xx
-            croppedImg.Save(Path.Combine(saveDirectory, filename), ImageFormat.Png) |> ignore
+        // crop out Google logo (sorry!)
+        let croppedImg = wholeBitmap.Clone(new Rectangle(0, 0, wholeBitmap.Width,
+                                                            int(float(wholeBitmap.Height) * 0.957)),
+                                            Imaging.PixelFormat.DontCare)
 
-            // rate limit or Google will blacklist you
-            let secondsWait = normalDist.Sample()
-            printfn "Sleeping %f seconds..." secondsWait
-            Thread.Sleep((int)(1000.0 * secondsWait))
+        // ensure images are alphabetically sortable ("001" not just "1")
+        let filename = sprintf "img_y%03i_x%03i.png" yy xx
+        croppedImg.Save(Path.Combine(saveDirectory, filename), ImageFormat.Png) |> ignore
+
+        // rate limit or Google will blacklist you
+        let secondsWait = normalDistWait.Sample()
+        printfn " | Sleeping %f seconds..." secondsWait
+        Thread.Sleep((int)(1000.0 * secondsWait))
